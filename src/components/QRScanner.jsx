@@ -50,23 +50,28 @@ export default function QRScanner({ onScanSuccess, onScanError }) {
         console.log('Using camera:', cameraId);
       }
 
-      await html5QrCode.start(
-        cameraId || { facingMode: "environment" }, // Use specific camera or fallback to facingMode
-        {
-          fps: 10, // Optimal FPS for detection
-          qrbox: { width: qrboxSize, height: qrboxSize },
-          aspectRatio: 1.0, // Square scanning area
-          disableFlip: false, // Allow QR code in any orientation
-          videoConstraints: {
-            facingMode: "environment",
-            // Higher resolution for better quality and detection
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 }
-          },
-          // Additional config for better scanning
-          rememberLastUsedCamera: true,
-          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+      // Configuration to prevent zoom and use wide angle
+      const config = {
+        fps: 10, // Optimal FPS for detection
+        qrbox: { width: qrboxSize, height: qrboxSize },
+        // Don't set aspectRatio - let camera use its natural aspect ratio
+        disableFlip: false, // Allow QR code in any orientation
+        videoConstraints: {
+          facingMode: cameraId ? undefined : "environment",
+          // Request wide angle by using lower resolution or no constraints
+          // Lower resolution typically uses wider field of view
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          // Explicitly disable zoom if supported
+          zoom: false
         },
+        rememberLastUsedCamera: true,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+      };
+
+      await html5QrCode.start(
+        cameraId || { facingMode: "environment" },
+        config,
         (decodedText, decodedResult) => {
           // Success callback - QR code detected
           console.log('QR Code detected:', decodedText);
@@ -99,6 +104,40 @@ export default function QRScanner({ onScanSuccess, onScanError }) {
       setScanning(true);
       setStatus('Scanning... Point camera at QR code');
       console.log('Scanner started successfully');
+      
+      // Fix zoom issue by accessing video element directly after a short delay
+      setTimeout(() => {
+        const readerElement = document.getElementById('reader');
+        if (readerElement) {
+          const videoElement = readerElement.querySelector('video');
+          if (videoElement) {
+            // Ensure video uses contain (no zoom/crop) and full field of view
+            videoElement.style.objectFit = 'contain';
+            videoElement.style.width = '100%';
+            videoElement.style.height = '100%';
+            videoElement.style.transform = 'none';
+            
+            // Try to get the video track and disable zoom if possible
+            const stream = videoElement.srcObject;
+            if (stream) {
+              const videoTrack = stream.getVideoTracks()[0];
+              if (videoTrack && videoTrack.getSettings) {
+                const settings = videoTrack.getSettings();
+                console.log('Camera settings:', settings);
+                // If zoom is available, try to set it to minimum
+                if (videoTrack.getCapabilities && 'zoom' in videoTrack.getCapabilities()) {
+                  const capabilities = videoTrack.getCapabilities();
+                  if (capabilities.zoom) {
+                    videoTrack.applyConstraints({
+                      advanced: [{ zoom: capabilities.zoom.min || 1 }]
+                    }).catch(err => console.log('Could not set zoom:', err));
+                  }
+                }
+              }
+            }
+          }
+        }
+      }, 500);
     } catch (err) {
       console.error('Error starting scanner:', err);
       setError(`Failed to start camera: ${err.message}. Please check permissions and try again.`);
@@ -154,13 +193,21 @@ export default function QRScanner({ onScanSuccess, onScanError }) {
       const result = await markAttendance(qrData);
 
       if (result.success) {
-        // Show success confirmation
+        // Show success confirmation with scan type
+        const scanTypeLabels = {
+          'check_in': 'Checked In',
+          'lunch_out': 'Lunch Break Started',
+          'lunch_in': 'Lunch Break Ended',
+          'check_out': 'Checked Out'
+        };
+        
         setSuccessData({
           employeeName: `${qrData.firstName} ${qrData.lastName}`,
           department: qrData.department || 'N/A',
-          role: qrData.role
+          role: qrData.role,
+          scanType: scanTypeLabels[result.scanType] || result.scanType
         });
-        setStatus('Attendance marked successfully!');
+        setStatus(`${scanTypeLabels[result.scanType] || result.scanType} successfully!`);
         
         if (onScanSuccess) {
           onScanSuccess(result.data, qrData);
@@ -205,7 +252,7 @@ export default function QRScanner({ onScanSuccess, onScanError }) {
                 </svg>
               </div>
               
-              <h3 className="text-2xl font-bold text-gray-800 mb-2">Attendance Marked!</h3>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">{successData.scanType || 'Attendance Marked'}!</h3>
               <p className="text-lg font-semibold text-primary-600 mb-1">{successData.employeeName}</p>
               <p className="text-sm text-gray-600 mb-4">{successData.department} • {successData.role}</p>
               <p className="text-sm text-gray-500">Scanning will resume automatically...</p>
@@ -214,104 +261,68 @@ export default function QRScanner({ onScanSuccess, onScanError }) {
         </div>
       )}
 
-      {/* Scanner Container */}
-      <div className="relative w-full" style={{ height: 'calc(100vh - 300px)', minHeight: '500px' }}>
+      {/* Scanner Container - Simple, no borders */}
+      <div className="relative w-full" style={{ height: 'calc(100vh - 150px)', minHeight: '400px' }}>
         <div 
           id="reader" 
-          className="w-full h-full rounded-lg overflow-hidden bg-black"
+          className="w-full h-full overflow-hidden bg-black"
         />
         
-        {/* Scanning Overlay with Instructions */}
+        {/* Simple Status Text - Only when scanning */}
         {scanning && (
-          <div className="absolute inset-0 pointer-events-none">
-            {/* Corner Guides */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="relative" style={{ width: '85vw', maxWidth: '500px', aspectRatio: '1/1' }}>
-                {/* Top Left Corner */}
-                <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-white rounded-tl-lg"></div>
-                {/* Top Right Corner */}
-                <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-white rounded-tr-lg"></div>
-                {/* Bottom Left Corner */}
-                <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-white rounded-bl-lg"></div>
-                {/* Bottom Right Corner */}
-                <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-white rounded-br-lg"></div>
-              </div>
-            </div>
-            
-            {/* Scan Hint at Bottom */}
-            <div className="absolute bottom-8 left-0 right-0 px-4">
-              <div className="bg-black bg-opacity-70 text-white rounded-lg px-4 py-3 text-center max-w-md mx-auto">
-                <p className="text-sm font-medium">{scanHint}</p>
-                <p className="text-xs mt-1 text-gray-300">Keep the QR code within the frame</p>
-              </div>
+          <div className="absolute bottom-4 left-0 right-0 px-4 pointer-events-none">
+            <div className="bg-black/60 text-white text-center py-2 px-4 rounded max-w-xs mx-auto">
+              <p className="text-sm">{scanHint}</p>
             </div>
           </div>
         )}
 
         {!scanning && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-90 rounded-lg">
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
             <div className="text-center text-white">
-              <svg className="w-20 h-20 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
-              <p className="text-xl font-medium">Camera not active</p>
-              <p className="text-sm text-gray-300 mt-2">Click "Start Scanning" to begin</p>
+              <p className="text-lg font-medium">Camera not active</p>
+              <p className="text-sm text-gray-300 mt-1">Click "Start Scanning" to begin</p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Status and Error Messages */}
-      <div className="mt-4">
-        <div className={`p-3 rounded-lg ${
+      {/* Compact Status and Control */}
+      <div className="mt-2 flex items-center gap-2">
+        {/* Compact Status */}
+        <div className={`flex-1 px-3 py-2 rounded text-sm ${
           error 
-            ? 'bg-red-50 text-red-800 border border-red-200' 
+            ? 'bg-red-500/90 text-white' 
             : scanning 
-              ? 'bg-blue-50 text-blue-800 border border-blue-200' 
-              : 'bg-gray-50 text-gray-800 border border-gray-200'
+              ? 'bg-blue-500/90 text-white' 
+              : 'bg-gray-700 text-gray-200'
         }`}>
-          <p className="font-medium">{status}</p>
-          {error && (
-            <p className="text-sm mt-1">{error}</p>
-          )}
+          <p>{status}</p>
         </div>
-      </div>
 
-      {/* Control Buttons */}
-      <div className="flex gap-4 mt-4">
+        {/* Compact Control Button */}
         {!scanning ? (
           <button
             onClick={startScanning}
-            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+            className="bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded transition-colors flex items-center gap-2"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
-            Start Scanning
+            Start
           </button>
         ) : (
           <button
             onClick={stopScanning}
-            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+            className="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded transition-colors flex items-center gap-2"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
             </svg>
-            Stop Scanning
+            Stop
           </button>
         )}
-      </div>
-
-      {/* Instructions */}
-      <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-        <h3 className="font-semibold text-gray-800 mb-2">Tips for better scanning:</h3>
-        <ul className="text-sm text-gray-600 space-y-1">
-          <li>• Ensure good lighting and hold the QR code steady</li>
-          <li>• Position the QR code within the white frame</li>
-          <li>• Keep the phone screen at a comfortable distance (not too close or far)</li>
-          <li>• QR codes expire after 60 seconds - make sure it's fresh</li>
-        </ul>
       </div>
     </div>
   );

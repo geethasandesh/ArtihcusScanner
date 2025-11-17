@@ -163,7 +163,7 @@ export default function AttendancePage() {
                         Role
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Check-in Time
+                        Scan Type
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Scanned At
@@ -192,12 +192,24 @@ export default function AttendancePage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {formatTime(record.check_in_time)}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {formatDate(record.check_in_time)}
-                          </div>
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            record.scan_type === 'check_in' ? 'bg-blue-100 text-blue-800' :
+                            record.scan_type === 'lunch_out' ? 'bg-yellow-100 text-yellow-800' :
+                            record.scan_type === 'lunch_in' ? 'bg-green-100 text-green-800' :
+                            'bg-purple-100 text-purple-800'
+                          }`}>
+                            {record.scan_type ? record.scan_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Check In'}
+                          </span>
+                          {(record.is_late || record.is_early_departure) && (
+                            <div className="mt-1">
+                              {record.is_late && (
+                                <span className="text-xs text-red-600">Late</span>
+                              )}
+                              {record.is_early_departure && (
+                                <span className="text-xs text-orange-600">Early</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
@@ -237,4 +249,5 @@ export default function AttendancePage() {
     </div>
   );
 }
+
 
